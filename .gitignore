@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / Editor config
+.idea/
+.vscode/
+*.iml
+
+# OS junk
+.DS_Store
+__MACOSX/
+Thumbs.db
+
+# Docker
+*.env
+
+# Logs
+*.log

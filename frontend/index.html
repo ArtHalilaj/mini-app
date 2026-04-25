@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Distributed Compute Demo</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding: 60px 20px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      padding: 40px;
+      width: 100%;
+      max-width: 560px;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      color: #1a3560;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      color: #666;
+      font-size: 0.9rem;
+      margin-bottom: 32px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #444;
+      margin-bottom: 6px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    input[type="number"] {
+      flex: 1;
+      padding: 10px 14px;
+      font-size: 1rem;
+      border: 1.5px solid #d0d5dd;
+      border-radius: 8px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="number"]:focus {
+      border-color: #2b5799;
+    }
+
+    button {
+      padding: 10px 22px;
+      font-size: 1rem;
+      font-weight: 600;
+      background: #2b5799;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+      white-space: nowrap;
+    }
+
+    button:hover  { background: #1a3560; }
+    button:active { background: #122545; }
+    button:disabled { background: #9ab0d4; cursor: not-allowed; }
+
+    /* Status box */
+    #status-box {
+      display: none;
+      border-radius: 8px;
+      padding: 18px 20px;
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    #status-box.pending  { background: #f4f6fb; border: 1px solid #d0d5dd; color: #444; }
+    #status-box.success  { background: #edfaf3; border: 1px solid #6fcf97; color: #1e6e42; }
+    #status-box.error    { background: #fff1f1; border: 1px solid #f28b82; color: #a33; }
+
+    .status-label { font-weight: 700; margin-bottom: 4px; }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .job-id {
+      font-family: monospace;
+      font-size: 0.78rem;
+      color: #888;
+      margin-top: 6px;
+    }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 4px 16px;
+      margin-top: 8px;
+    }
+    .result-grid .key   { font-weight: 600; }
+    .result-grid .value { font-family: monospace; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Distributed Compute Demo</h1>
+    <p class="subtitle">Submits a Celery job split into parallel chunks via FastAPI and polls until done.</p>
+
+    <label for="chunks">Number of parallel chunks (1 – 50)</label>
+    <div class="input-row">
+      <input type="number" id="chunks" value="5" min="1" max="50" />
+      <button id="submit-btn" onclick="submitJob()">Submit Job</button>
+    </div>
+
+    <div id="status-box"></div>
+  </div>
+
+  <script>
+    const API = 'http://localhost:8000';
+    let pollTimer = null;
+
+    function setStatus(cls, html) {
+      const box = document.getElementById('status-box');
+      box.style.display = 'block';
+      box.className = cls;
+      box.innerHTML = html;
+    }
+
+    async function submitJob() {
+      const n = parseInt(document.getElementById('chunks').value, 10);
+      if (n < 1 || n > 50) {
+        setStatus('error', '<div class="status-label">Invalid input</div>n must be between 1 and 50.');
+        return;
+      }
+
+      if (pollTimer) clearInterval(pollTimer);
+
+      document.getElementById('submit-btn').disabled = true;
+      setStatus('pending', '<span class="spinner"></span> Submitting job…');
+
+      try {
+        const res  = await fetch(`${API}/jobs?n=${n}`, { method: 'POST' });
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || 'Submission failed');
+        }
+
+        setStatus('pending',
+          `<div class="status-label"><span class="spinner"></span> Running…</div>
+           <div class="job-id">Job ID: ${data.job_id}</div>`
+        );
+
+        pollStatus(data.job_id);
+
+      } catch (err) {
+        document.getElementById('submit-btn').disabled = false;
+        setStatus('error', `<div class="status-label">Error</div>${err.message}`);
+      }
+    }
+
+    function pollStatus(jobId) {
+      pollTimer = setInterval(async () => {
+        try {
+          const res  = await fetch(`${API}/jobs/${jobId}`);
+          const data = await res.json();
+
+          if (data.status === 'SUCCESS') {
+            clearInterval(pollTimer);
+            document.getElementById('submit-btn').disabled = false;
+            setStatus('success',
+              `<div class="status-label">✓ Job complete</div>
+               <div class="result-grid">
+                 <span class="key">Total</span>      <span class="value">${data.result.total}</span>
+                 <span class="key">Chunks</span>     <span class="value">${data.result.chunks}</span>
+                 <span class="key">Chunk size</span> <span class="value">${data.result.chunk_size} numbers each</span>
+               </div>
+               <div class="job-id">Job ID: ${jobId}</div>`
+            );
+
+          } else if (data.status === 'FAILURE') {
+            clearInterval(pollTimer);
+            document.getElementById('submit-btn').disabled = false;
+            setStatus('error',
+              `<div class="status-label">Job failed</div>${JSON.stringify(data.result)}`
+            );
+
+          } else {
+            setStatus('pending',
+              `<div class="status-label"><span class="spinner"></span> Status: ${data.status}</div>
+               <div class="job-id">Polling every second… &nbsp;|&nbsp; Job ID: ${jobId}</div>`
+            );
+          }
+
+        } catch (err) {
+          clearInterval(pollTimer);
+          document.getElementById('submit-btn').disabled = false;
+          setStatus('error', `<div class="status-label">Polling error</div>${err.message}`);
+        }
+      }, 1000);
+    }
+  </script>
+</body>
+</html>
